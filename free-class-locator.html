@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free Class Locator</title>
+<style>
+:root{--bg:#f4f5fa;--card:#fff;--tx:#1b2033;--mu:#66708a;--bd:#e0e4ef;--ok:#178a52;--okb:#e6f6ee;--bad:#c93d3d;--badb:#fbeaea;--ac:#4757d6}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--card:#1b1e2a;--tx:#e8eaf3;--mu:#9aa2bd;--bd:#2c3144;--ok:#3fc287;--okb:#173427;--bad:#ef6b6b;--badb:#3a1f24;--ac:#8b97ff}}
+:root[data-theme="dark"]{--bg:#12141c;--card:#1b1e2a;--tx:#e8eaf3;--mu:#9aa2bd;--bd:#2c3144;--ok:#3fc287;--okb:#173427;--bad:#ef6b6b;--badb:#3a1f24;--ac:#8b97ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}
+h1{font-size:24px;margin:8px 0 2px}h2{font-size:17px;margin:0 0 10px}h3{font-size:14px;margin:16px 0 8px;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+.sub{color:var(--mu);margin:0 0 14px}.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+.ask{display:flex;gap:8px}.ask input{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font-size:15px}
+button{border:0;background:var(--ac);color:#fff;border-radius:10px;padding:0 16px;cursor:pointer;font-size:14px;min-height:40px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.chips button{background:var(--bg);color:var(--tx);border:1px solid var(--bd);font-size:12px;padding:5px 10px;min-height:0;border-radius:14px}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;border:1px solid var(--bd);color:var(--mu);margin-left:6px}
+.u{font-size:13px;color:var(--mu);margin:6px 0}.u b{color:var(--tx)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+select,input[type=time]{padding:7px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx)}
+.rg{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.room{border:1px solid var(--bd);border-left:5px solid;border-radius:10px;padding:9px 11px;font-size:13px}
+.room.free{border-left-color:var(--ok);background:var(--okb)}.room.busy{border-left-color:var(--bad);background:var(--badb)}
+.room b{font-size:15px}.best{border:2px solid var(--ok);border-radius:12px;padding:10px 12px;margin:8px 0;background:var(--okb)}
+.note{color:var(--mu);font-size:12px;margin-top:10px}.warn{font-size:13px;margin:6px 0;color:var(--bad)}
+</style></head><body><main>
+<h1>Free Class Locator</h1>
+<p class="sub">Find quiet, empty rooms from the 10 class timetables. Type a request or browse the floor grid.</p>
+
+<section class="card"><h2>AI Room Finder</h2>
+ <div class="ask"><input id="q" placeholder="I need an AC room on the ground floor for me and my team for the next 2 hours" autocomplete="off"><button id="go">Find rooms</button></div>
+ <div class="chips" id="ex"></div><div id="parsed" class="u"></div><div id="ans" aria-live="polite"></div></section>
+
+<section class="card"><h2>Floor Grid</h2>
+ <div class="row"><select id="day" aria-label="Day"></select><input type="time" id="tm" aria-label="Time"><button id="now">Use current time</button><label><input type="checkbox" id="fa"> Only free rooms</label></div>
+ <div class="u" id="sum"></div><div id="grid"></div></section>
+
+<p class="note">Data source: the 13 section timetables in the 10 PDFs, read into the table in this file. Assumptions: 1xx rooms = ground floor, 2xx = 1st floor, and so on. The PDFs do not say which rooms are AC, so the AC flags are placeholders (edit <code>AC</code> in the code). First-year sheets use slightly different period times and are mapped to the same 9 periods. Breaks and lunch (12:30 to 13:20) count as free time.</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const PT=[[540,590],[590,640],[650,700],[700,750],[750,800],[800,850],[850,900],[910,960],[960,1010]];
+const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],FULL=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+const FN={1:'Ground floor',2:'1st floor',3:'2nd floor',4:'3rd floor',5:'4th floor',6:'5th floor',7:'6th floor'};
+const LABS=['IST 107','IST 108','IST 309','IST 617','IST 618'];
+const AC=[...LABS,'TB-106']; // PLACEHOLDER: not in the PDFs, edit this list
+// r = home room, L = legend for other rooms, d = Mon..Fri strings for periods 1-9 (h = home room, . = free)
+const D=[
+{n:'II ECE-DS B',r:'IST 411',L:{a:'IST 309,IST 107',b:'IST 401',c:'TB-106'},d:['..aa.hhhh','aa...hhhh','b....hhhh','bbcc.hhhh','c....hhhh']},
+{n:'III BME',r:'IST 211',L:{a:'IST 625',b:'IST 107',c:'IST 108'},d:['aabb.hhhh','cca..hhhh','.....hhhh','...c.hhhh','c....hhhh']},
+{n:'III ECE-A',r:'IST 518',L:{a:'IST 625',b:'IST 108,IST 309'},d:['hhhh.aa..','hhhh..a..','hhhh...bb','hhhh.....','hhhh.bb..']},
+{n:'III ECE-B',r:'IST 518',L:{a:'IST 625',b:'IST 108,IST 309'},d:['bb...hhhh','aa...hhhh','a....hhhh','bb...hhhh','.....hhhh']},
+{n:'III ECE-DS',r:'IST 519',L:{a:'IST 625',b:'IST 108,IST 107'},d:['hhhh.....','hhhh.bb..','hhhh...aa','hhhh.....','hhhh.a.bb']},
+{n:'IV ECE-A',r:'IST 225',L:{a:'IST 108'},d:['h.hh.....','hhhh.....','hahh.....','hhhh.....','hhhh.....']},
+{n:'IV ECE-B',r:'IST 227',L:{a:'IST 108'},d:['hhhh.....','hhhh.....','hhhh.....','hhah.....','hhh......']},
+{n:'II BME',r:'IST 602',L:{a:'IST 107,IST 309',b:'TB-106'},d:['hhhh.aa..','hhhh.bb..','hhh..bh..','hhhh...aa','hhhh...hh']},
+{n:'II ECE-DS A',r:'IST 416',L:{a:'IST 602',b:'IST 309,IST 107',c:'TB-106'},d:['hhhh.aabb','hhhh.a.cc','hhhh..c..','hhhh.bb..','hhhh.....']},
+{n:'I ECE-A',r:'IST 602',L:{a:'IST 710',b:'IST 510',c:'IST 618',d:'IST 108',e:'IST 201',f:'IST 626'},d:['hhhh...aa','hhhh.....','hhh..ccdd','hhhh.bbee','hhhh.hfff']},
+{n:'I ECE-B/EEE',r:'IST 602',L:{g:'IST 609',x:'IST 710,IST 520',y:'IST 617',b:'IST 510',c:'IST 618',e:'IST 201',f:'IST 626',a:'IST 710'},d:['gx...hhhh','.....hhhh','xybbc.hhh','eefa.hfff','yy.fff.hh']},
+{n:'I ECE-DS',r:'IST 502',L:{a:'IST 710',b:'IST 510',y:'IST 617',e:'IST 201',f:'IST 626'},d:['a.yy.hhhh','..ee.hhhh','bba.yyhhh','abahh..hh','fff......']},
+{n:'I Biotech-B',r:'IST 702',L:{z:'IST 520',x:'IST 710,IST 520',a:'IST 710',m:'IST 510,IST 520'},d:['z..x.hhhh','aaza..hhh','.....hhhh','..am.hhhh','hhhhhh...']}];
+
+const occ={};
+D.forEach(s=>s.d.forEach((row,di)=>[...row].forEach((ch,p)=>{
+ if(ch==='.')return;
+ (ch==='h'?[s.r]:(s.L[ch]||'').split(',')).filter(Boolean).forEach(r=>{((occ[r]??={})[di+1]??=[]).push({s:PT[p][0],e:PT[p][1],by:s.n})});})));
+const rooms=Object.keys(occ).sort(),fl=r=>+r.match(/\d/)[0],isAC=r=>AC.includes(r);
+const mm=t=>String(t/60|0).padStart(2,'0')+':'+String(t%60).padStart(2,'0'),hm=v=>{const[a,b]=v.split(':');return +a*60+ +b};
+const tags=r=>(isAC(r)?'<span class="tag">AC</span>':'')+(LABS.includes(r)?'<span class="tag">Lab</span>':'');
+
+// is room free for [t, t+d) on this day?
+function info(r,day,t,d){
+ const L=occ[r][day]||[],hit=L.find(x=>x.s<t+d&&x.e>t);
+ if(hit){let u=hit.e,go=1;while(go){go=0;L.forEach(x=>{if(x.s<=u+10&&x.e>u){u=x.e;go=1}})}return{free:false,by:hit.by,until:u}}
+ const n=L.filter(x=>x.s>=t+d).map(x=>x.s);return{free:true,until:n.length?Math.min(...n):null}}
+
+// ---------- Floor grid ----------
+function grid(){
+ const day=+$('day').value,t=hm($('tm').value),by={};let free=0,h='';
+ rooms.forEach(r=>(by[fl(r)]??=[]).push(r));
+ Object.keys(by).sort().forEach(f=>{
+  const cards=by[f].map(r=>{const i=info(r,day,t,1);if(i.free)free++;if($('fa').checked&&!i.free)return'';
+   return `<div class="room ${i.free?'free':'busy'}"><b>${r}</b>${tags(r)}<div>${i.free?(i.until?'Free until '+mm(i.until):'Free for the rest of the day'):'In use: '+i.by+' until '+mm(i.until)}</div></div>`}).join('');
+  if(cards)h+=`<h3>${FN[f]}</h3><div class="rg">${cards}</div>`});
+ $('grid').innerHTML=h||'<p class="u">No rooms to show.</p>';
+ $('sum').innerHTML=`<b>${free} free</b> · ${rooms.length-free} in use · ${DAYS[day]} ${mm(t)}`+((day<1||day>5)?' · no lectures on weekends':'');
+}
+
+// ---------- AI Room Finder (reads the sentence, then runs the timetable maths) ----------
+function parse(q){
+ const s=q.toLowerCase(),o={ac:null,floor:null,dur:60,day:+$('day').value,t:hm($('tm').value),type:null,team:/team|group|friends|\bus\b|people|students/.test(s)};let m;
+ if(/\bnon[\s-]?ac\b|without ac|no ac|non air/.test(s))o.ac=false;else if(/\bac\b|air[\s-]?condition/.test(s))o.ac=true;
+ if(/ground/.test(s))o.floor=1;else if(m=s.match(/(first|second|third|fourth|fifth|sixth|\d)(?:st|nd|rd|th)?\s*floor/))o.floor=({first:2,second:3,third:4,fourth:5,fifth:6,sixth:7})[m[1]]||+m[1]+1;
+ const W={a:1,an:1,one:1,two:2,three:3,four:4};
+ if(/half (an )?hour/.test(s))o.dur=30;
+ else if(m=s.match(/(\d+(?:\.\d+)?|an?|one|two|three|four)\s*(?:hours?|hrs?)\b(?:\s*(?:and\s*)?(\d+)\s*min)?/))o.dur=Math.round((+m[1]||W[m[1]])*60+(+m[2]||0));
+ else if(m=s.match(/(\d+)\s*(?:min|minutes)/))o.dur=+m[1];
+ if(m=s.match(/(?:at|from|after|by)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/)){let h=+m[1];if(m[3]==='pm'&&h<12)h+=12;if(m[3]==='am'&&h===12)h=0;if(!m[3]&&h<8)h+=12;o.t=h*60+ +(m[2]||0)}
+ const di=FULL.findIndex(d=>s.includes(d));if(di>=0)o.day=di;else if(/tomorrow/.test(s))o.day=(o.day+1)%7;
+ if(/\blab\b/.test(s))o.type='lab';else if(/class\s?room|lecture/.test(s))o.type='class';
+ return o}
+const cands=o=>rooms.filter(r=>(o.floor==null||fl(r)===o.floor)&&(o.ac==null||isAC(r)===o.ac)&&(!o.type||(o.type==='lab')===LABS.includes(r))).map(r=>({r,...info(r,o.day,o.t,o.dur)})).filter(x=>x.free);
+function run(q){
+ if(!q.trim())return;const o=parse(q);let list=cands(o),note='';
+ if(!list.length){const o2={...o,floor:null};list=cands(o2);if(list.length)note='No free room matches that floor, so these are on other floors.';
+  else{list=cands({...o2,ac:null});if(list.length)note='No free AC room for that slot, so these are non-AC.'}}
+ const dur=o.dur>=60?(o.dur/60).toFixed(o.dur%60?1:0)+' h':o.dur+' min';
+ $('parsed').innerHTML=`Understood: <b>${o.ac===true?'AC':o.ac===false?'Non-AC':'Any AC'}</b> · <b>${o.floor?FN[o.floor]:'Any floor'}</b> · <b>${o.type==='lab'?'Lab':o.type==='class'?'Classroom':'Any room'}</b> · <b>${dur}</b> from <b>${DAYS[o.day]} ${mm(o.t)}</b>${o.team?' · group':''}`;
+ if(!list.length){$('ans').innerHTML=`<p class="warn">No room is free for the whole ${dur} from ${mm(o.t)}. Try a shorter time or a later start.</p>`;return}
+ list.sort((a,b)=>(b.until??1e9)-(a.until??1e9)||fl(a.r)-fl(b.r));const b=list[0];
+ let h=(note?`<p class="warn">${note}</p>`:'')+(o.day<1||o.day>5?'<p class="u">No lectures on weekends, so every room is free.</p>':'')+
+  `<div class="best"><b>Best pick: ${b.r}</b>${tags(b.r)} · ${FN[fl(b.r)]} · free ${b.until?'until '+mm(b.until):'for the rest of the day'}</div><p class="u"><b>${list.length}</b> rooms are free for the whole ${dur}:</p>`;
+ const by={};list.forEach(x=>(by[fl(x.r)]??=[]).push(x));
+ Object.keys(by).sort().forEach(f=>{h+=`<h3>${FN[f]}</h3><div class="rg">`+by[f].map(x=>`<div class="room free"><b>${x.r}</b>${tags(x.r)}<div>Free ${x.until?'until '+mm(x.until):'for the rest of the day'}</div></div>`).join('')+'</div>'});
+ if(o.ac!==null)h+='<p class="note">AC status is a placeholder because the timetables do not list it.</p>';
+ $('ans').innerHTML=h}
+
+// ---------- wiring ----------
+$('day').innerHTML=DAYS.map((d,i)=>`<option value="${i}">${d}</option>`).join('');
+const setNow=()=>{const n=new Date();$('day').value=n.getDay();$('tm').value=mm(n.getHours()*60+n.getMinutes());grid()};
+setNow();
+['day','tm','fa'].forEach(id=>$(id).onchange=grid);$('now').onclick=setNow;
+$('go').onclick=()=>run($('q').value);$('q').onkeydown=e=>{if(e.key==='Enter')run($('q').value)};
+['I need an AC room on the ground floor for me and my team for the next 2 hours','Quiet non-AC classroom on the 4th floor for 1 hour at 2pm on Monday','Any lab free for 90 minutes from 11:00 tomorrow'].forEach(t=>{const b=document.createElement('button');b.textContent=t;b.onclick=()=>{$('q').value=t;run(t)};$('ex').appendChild(b)});
+</script></body></html>
